@@ -3,6 +3,8 @@ import Twilio from 'twilio';
 
 export interface ServerlessEnvironment {
   SIP_DOMAIN_URI?: string;
+  SYNC_SERVICE_SID?: string;
+  SYNC_MAP_PHONES_NAME?: string;
   [key: string]: string | undefined;
 }
 
@@ -17,6 +19,67 @@ export interface CallTransferEvent {
     headers: {};
   };
   [key: string]: any;
+}
+
+/**
+ * Extract E.164 phone number from SIP URI
+ */
+function extractPhoneFromSipUri(sipUri: string): string | null {
+  if (!sipUri || typeof sipUri !== 'string') {
+    return null;
+  }
+
+  // Remove angle brackets if present
+  let cleaned = sipUri.trim();
+  if (cleaned.startsWith('<') && cleaned.endsWith('>')) {
+    cleaned = cleaned.slice(1, -1);
+  }
+
+  // Extract number from SIP URI using regex
+  // Pattern: sip:(optional +)(digits)@(domain)
+  const match = cleaned.match(/^sip:((\+)?[0-9]+)@(.*)/);
+
+  if (match && match[1]) {
+    return match[1]; // Return the captured phone number (with or without +)
+  }
+
+  return null;
+}
+
+/**
+ * Fetch phone number routing configuration from Sync Map
+ */
+async function fetchNumberConfig(
+  restClient: any,
+  serviceSid: string,
+  mapName: string,
+  phoneNumber: string
+): Promise<{ type: string; uri: string } | null> {
+  if (!restClient || !serviceSid || !mapName || !phoneNumber) {
+    console.error('fetchNumberConfig: Missing required parameters');
+    return null;
+  }
+
+  try {
+    const item = await restClient.sync.v1
+      .services(serviceSid)
+      .syncMaps(mapName)
+      .syncMapItems(phoneNumber)
+      .fetch();
+
+    // Return the data object which should contain { type, uri }
+    return item.data;
+  } catch (error: any) {
+    // 404 means the phone number is not in the Map - this is expected behavior
+    if (error.status === 404) {
+      console.log(`fetchNumberConfig: No entry found for ${phoneNumber}`);
+      return null;
+    }
+
+    // Other errors should be logged but still return null for graceful degradation
+    console.error(`fetchNumberConfig: Error fetching config for ${phoneNumber}: ${error.message}`);
+    return null;
+  }
 }
 
 /**
@@ -63,7 +126,38 @@ export const handler: ServerlessFunctionSignature<ServerlessEnvironment, CallTra
 
   console.log(`callTransfer: Processing REFER for Call SID ${event.CallSid} to target: ${target}`);
 
-  // Step 3: Extract UUI from headers
+  // Step 3: Extract phone number and check Sync Map for routing configuration
+  const phoneNumber = extractPhoneFromSipUri(target);
+  let mapConfig = null;
+  let routingSource = 'default';
+
+  if (phoneNumber && context.SYNC_SERVICE_SID && context.SYNC_MAP_PHONES_NAME) {
+    try {
+      console.log(`callTransfer: Looking up ${phoneNumber} in Sync Map`);
+
+      const restClient = context.getTwilioClient();
+      mapConfig = await fetchNumberConfig(
+        restClient,
+        context.SYNC_SERVICE_SID,
+        context.SYNC_MAP_PHONES_NAME,
+        phoneNumber
+      );
+
+      if (mapConfig) {
+        console.log(`callTransfer: Found config - type=${mapConfig.type}, uri=${mapConfig.uri}`);
+        routingSource = 'sync';
+      } else {
+        console.log(`callTransfer: No config found for ${phoneNumber}, using PSTN fallback`);
+      }
+    } catch (error) {
+      console.error(`callTransfer: Sync lookup error: ${error instanceof Error ? error.message : error}`);
+      // Continue with fallback
+    }
+  } else {
+    console.log(`callTransfer: Sync not configured or no phone extracted, using default routing`);
+  }
+
+  // Step 4: Extract UUI from headers
   const UUI = event["SipHeader_x-inin-cnv"]
            || event["SipHeader_User-to-User"]
            || event.CallSid;
@@ -71,27 +165,6 @@ export const handler: ServerlessFunctionSignature<ServerlessEnvironment, CallTra
   console.log(`callTransfer: UUI for transfer: ${UUI}`);
 
   try {
-    // Step 4: Determine transfer type and validate
-    let transferType: 'sip' | 'pstn';
-    let transferDestination: string;
-
-    if (target.startsWith('sip:')) {
-      // SIP call
-      transferType = 'sip';
-      transferDestination = target;
-    } else {
-      // PSTN call
-      transferType = 'pstn';
-      transferDestination = target;
-
-      // Validate E.164 format
-      if (!transferDestination.match(/^\+[1-9]\d{1,14}$/)) {
-        console.error(`callTransfer: Invalid E.164 number: ${transferDestination}`);
-        voiceResponse.reject({ reason: 'busy' });
-        return callback(null, voiceResponse);
-      }
-    }
-
     // Step 5: Extract original caller for caller ID
     let callerIdForTransfer = event.From;
     if (callerIdForTransfer && callerIdForTransfer.startsWith('sip:')) {
@@ -101,22 +174,60 @@ export const handler: ServerlessFunctionSignature<ServerlessEnvironment, CallTra
       }
     }
 
-    console.log(`callTransfer: Type=${transferType}, Destination=${transferDestination}, CallerID=${callerIdForTransfer}`);
+    // Step 6: Route and dial based on Sync Map result or fallback
+    const routingType = mapConfig?.type || 'pstn';
 
-    // Step 6: Dial the transfer target based on type
-    if (transferType === 'pstn') {
-      // Transfer to PSTN number
-      voiceResponse.dial({ callerId: callerIdForTransfer }).number(transferDestination);
-      console.log(`callTransfer: Dialing PSTN ${transferDestination} with UUI ${UUI}`);
+    switch (routingType) {
+      case 'sip': {
+        // SIP routing from Map (with UUI)
+        if (!mapConfig) {
+          console.error(`callTransfer: mapConfig is null for SIP routing`);
+          voiceResponse.reject({ reason: 'busy' });
+          return callback(null, voiceResponse);
+        }
+        const sipDestination = mapConfig.uri;
+        const sipTarget = sipDestination.includes('?')
+          ? `${sipDestination}&User-to-User=${UUI}`
+          : `${sipDestination}?User-to-User=${UUI}`;
 
-    } else if (transferType === 'sip') {
-      // Transfer to SIP destination, pass UUI in header
-      const sipTarget = transferDestination.includes('?')
-        ? `${transferDestination}&User-to-User=${UUI}`
-        : `${transferDestination}?User-to-User=${UUI}`;
+        voiceResponse.dial().sip(sipTarget);
+        console.log(`callTransfer: Dialing SIP ${sipTarget} with UUI ${UUI} [source: Sync]`);
+        break;
+      }
 
-      voiceResponse.dial().sip(sipTarget);
-      console.log(`callTransfer: Dialing SIP ${sipTarget} with UUI ${UUI}`);
+      case 'client': {
+        // Client routing from Map (no UUI)
+        if (!mapConfig) {
+          console.error(`callTransfer: mapConfig is null for Client routing`);
+          voiceResponse.reject({ reason: 'busy' });
+          return callback(null, voiceResponse);
+        }
+        const clientDestination = mapConfig.uri;
+        const clientName = clientDestination.replace('client:', '');
+
+        voiceResponse.dial({ callerId: callerIdForTransfer }).client(clientName);
+        console.log(`callTransfer: Dialing Client ${clientName} [source: Sync]`);
+        break;
+      }
+
+      case 'number':
+      case 'pstn':
+      default: {
+        // PSTN routing (from Map or fallback)
+        const pstnDestination = mapConfig?.uri || phoneNumber || target;
+        const source = mapConfig ? 'Sync' : 'fallback';
+
+        // Validate E.164 format
+        if (!pstnDestination.match(/^\+[1-9]\d{1,14}$/)) {
+          console.error(`callTransfer: Invalid E.164 number: ${pstnDestination}`);
+          voiceResponse.reject({ reason: 'busy' });
+          return callback(null, voiceResponse);
+        }
+
+        voiceResponse.dial({ callerId: callerIdForTransfer }).number(pstnDestination);
+        console.log(`callTransfer: Dialing PSTN ${pstnDestination} [source: ${source}]`);
+        break;
+      }
     }
 
     return callback(null, voiceResponse);
