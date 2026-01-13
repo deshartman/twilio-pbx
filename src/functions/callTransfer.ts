@@ -22,67 +22,6 @@ export interface CallTransferEvent {
 }
 
 /**
- * Extract E.164 phone number from SIP URI
- */
-function extractPhoneFromSipUri(sipUri: string): string | null {
-  if (!sipUri || typeof sipUri !== 'string') {
-    return null;
-  }
-
-  // Remove angle brackets if present
-  let cleaned = sipUri.trim();
-  if (cleaned.startsWith('<') && cleaned.endsWith('>')) {
-    cleaned = cleaned.slice(1, -1);
-  }
-
-  // Extract number from SIP URI using regex
-  // Pattern: sip:(optional +)(digits)@(domain)
-  const match = cleaned.match(/^sip:((\+)?[0-9]+)@(.*)/);
-
-  if (match && match[1]) {
-    return match[1]; // Return the captured phone number (with or without +)
-  }
-
-  return null;
-}
-
-/**
- * Fetch phone number routing configuration from Sync Map
- */
-async function fetchNumberConfig(
-  restClient: any,
-  serviceSid: string,
-  mapName: string,
-  phoneNumber: string
-): Promise<{ type: string; uri: string } | null> {
-  if (!restClient || !serviceSid || !mapName || !phoneNumber) {
-    console.error('fetchNumberConfig: Missing required parameters');
-    return null;
-  }
-
-  try {
-    const item = await restClient.sync.v1
-      .services(serviceSid)
-      .syncMaps(mapName)
-      .syncMapItems(phoneNumber)
-      .fetch();
-
-    // Return the data object which should contain { type, uri }
-    return item.data;
-  } catch (error: any) {
-    // 404 means the phone number is not in the Map - this is expected behavior
-    if (error.status === 404) {
-      console.log(`fetchNumberConfig: No entry found for ${phoneNumber}`);
-      return null;
-    }
-
-    // Other errors should be logged but still return null for graceful degradation
-    console.error(`fetchNumberConfig: Error fetching config for ${phoneNumber}: ${error.message}`);
-    return null;
-  }
-}
-
-/**
  * Warm Transfer Handler for SIP REFER
  *
  * This function is triggered when a SIP phone sends a REFER message to transfer a call.
@@ -102,6 +41,10 @@ export const handler: ServerlessFunctionSignature<ServerlessEnvironment, CallTra
   event: CallTransferEvent,
   callback: ServerlessCallback
 ) => {
+  // Load shared utilities from assets
+  const assets = Runtime.getAssets();
+  const syncUtils = require(assets['/shared/syncUtils.js'].path);
+  const { extractPhoneFromSipUri, fetchNumberConfig } = syncUtils;
 
   const voiceResponse = new Twilio.twiml.VoiceResponse();
 
