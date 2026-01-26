@@ -153,6 +153,9 @@ export const handler: ServerlessFunctionSignature<ServerlessEnvironment, CallTra
         break;
       }
 
+      // TODO: Application calling to URL
+      case 'application':
+      // TODO: Implement application routing if needed
       case 'number':
       case 'pstn':
       default: {
