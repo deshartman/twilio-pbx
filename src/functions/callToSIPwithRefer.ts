@@ -1,5 +1,5 @@
+import '@twilio-labs/serverless-runtime-types';
 import { Context, ServerlessCallback, ServerlessFunctionSignature } from '@twilio-labs/serverless-runtime-types/types';
-import Twilio from 'twilio';
 
 export interface ServerlessEnvironment {
   SIP_DOMAIN_URI: string;

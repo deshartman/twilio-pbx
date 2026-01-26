@@ -214,16 +214,110 @@ Query Sync Map (numberConfig)
     └─→ No Map Entry → Fallback to PSTN
 ```
 
-### Shared Utilities
+### Function Structure
 
-**Location**: `src/assets/shared/syncUtils.js`
+Utility functions are implemented inline within each function file for simplified deployment and debugging. The main utilities are:
 
 - `extractPhoneFromSipUri(sipUri)`: Extracts E.164 number from SIP URI
-- `fetchNumberConfig(restClient, serviceSid, mapName, phoneNumber)`: Queries Sync Map
-
-These utilities are loaded at runtime using `Runtime.getAssets()`.
+- `fetchNumberConfig(restClient, serviceSid, mapName, phoneNumber)`: Queries Sync Map with comprehensive diagnostic logging
 
 ## Testing
+
+### Test Suite Overview
+
+The project includes comprehensive unit, integration, and end-to-end tests to ensure all routing functionality works correctly with your `.env.dev` configuration.
+
+Run the test suite:
+```bash
+npm test                    # Run all tests (36 tests)
+npm run test:watch          # Watch mode
+npm run test:coverage       # Generate coverage report
+```
+
+### Unit Tests (`syncUtils.test.ts`)
+
+Tests for utility functions without making Twilio API calls:
+- Phone number extraction from SIP URIs
+- Various URI format handling (with/without angle brackets, with/without + prefix)
+- Mock-based function validation
+- No Twilio credentials required
+
+### Integration Tests (`syncIntegration.test.ts`)
+
+Tests that interact with the actual Twilio Sync service using `.env.dev` configuration:
+
+#### 1. Basic CRUD Operations
+- Create Sync Map items
+- Read existing items
+- Update item data
+- Delete items
+- Handle 404 errors for missing items
+
+#### 2. fetchNumberConfig Function Tests (Comprehensive)
+
+Validates the `fetchNumberConfig()` function from `callTransfer.ts` with multiple routing types:
+
+**Test Data** (temporary entries created during tests):
+- `+19999999999` - SIP routing (`sip:+19999999999@test.sip.twilio.com`)
+- `+19998888888` - PSTN routing (`+18885551234`)
+- `+19997777777` - Client routing (`client:test_agent`)
+
+**Tests Include**:
+- ✓ SIP routing configuration validation
+- ✓ PSTN/number routing configuration validation
+- ✓ Client routing configuration validation
+- ✓ Null return for unmapped numbers (404 handling)
+- ✓ Null return for invalid parameters
+- ✓ Data structure validation (matches production format)
+
+**Test Lifecycle**:
+1. `beforeAll`: Creates all test entries in Sync Map
+2. Tests run: Validates `fetchNumberConfig()` reads data correctly
+3. `afterAll`: Removes all test entries (automatic cleanup)
+
+**Important**: Tests use temporary phone numbers and **do NOT interact with production data** (+614... numbers). All test entries are automatically cleaned up after the test suite completes.
+
+### End-to-End Tests (`callTransfer.test.ts`)
+
+Tests that simulate the complete SIP REFER flow from `callToSIPwithRefer.ts` → `callTransfer.ts` → TwiML output:
+
+**Test Data** (temporary entries created during tests):
+- `+19991111111` - SIP routing
+- `+19992222222` - Client routing
+- `+19993333333` - PSTN routing
+- `+19994444444` - Unmapped (fallback)
+
+**Tests Include**:
+- ✓ Routes to SIP destination when Sync entry type is "sip" (verifies switch case 'sip')
+- ✓ Routes to Twilio Client when Sync entry type is "client" (verifies switch case 'client')
+- ✓ Routes to PSTN number when Sync entry type is "number" (verifies switch case 'number')
+- ✓ Falls back to PSTN when number is not in Sync Map (verifies default case)
+- ✓ Extracts phone number from ReferTransferTarget with angle brackets
+- ✓ Handles missing ReferTransferTarget with error
+- ✓ Preserves UUI from SIP headers in transfer
+- ✓ Uses CallSid as fallback UUI when headers are missing
+
+**What These Tests Verify**:
+1. Complete REFER event processing
+2. Sync Map lookup for each routing type
+3. Switch statement correctly routes based on `type` field (line 212 in callTransfer.ts)
+4. TwiML generation matches expected output for each routing type
+5. UUI header preservation for SIP routes
+6. Error handling for edge cases
+
+These tests provide end-to-end confirmation that the sync entry is correctly picked up and the switch statement routes calls appropriately.
+
+### Prerequisites for Integration Tests
+
+Required `.env.dev` configuration:
+```bash
+ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+AUTH_TOKEN=your_auth_token_here
+SYNC_SERVICE_SID=ISxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+SYNC_MAP_PHONES_NAME=numberConfig
+```
+
+If any variables are missing, the test setup will display clear warnings indicating which variables need to be set.
 
 ### Local Testing
 1. Build: `npm run build`
@@ -237,6 +331,20 @@ These utilities are loaded at runtime using `Runtime.getAssets()`.
 - Number in Map (Client type)
 - Number NOT in Map (fallback)
 - Invalid target format
+
+### Debugging Sync Issues
+
+The `fetchNumberConfig()` function includes comprehensive diagnostic logging:
+- Environment variable validation
+- Sync API call details
+- Response object inspection
+- Detailed error messages with status codes
+
+Check Twilio Function logs to see:
+- `Sync Config Check`: Validates environment configuration
+- `Sync API call`: Shows the exact API call being made
+- `Sync fetch result`: Full response object on success
+- `Sync API error`: Detailed error information including status codes
 
 ## Deployment
 

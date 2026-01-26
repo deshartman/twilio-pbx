@@ -1,10 +1,13 @@
 {
   "name": "twilio-pbx",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "This is an example IP PBX using Twilio Voice with registered SIP Endpoints and Sync for config",
   "private": true,
   "scripts": {
-    "test": "tsc --noEmit",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "typecheck": "tsc --noEmit",
     "start": "twilio-run --functions-folder dist/functions --assets-folder dist/assets",
     "deploy": "twilio-run deploy --functions-folder dist/functions --assets-folder dist/assets",
     "build": "tsc && npm run build:copy-assets",
@@ -18,8 +21,12 @@
     "twilio": "5.11.2"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^25.0.6",
     "copyfiles": "^2.4.1",
+    "dotenv": "^17.2.3",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.6",
     "twilio-run": "^5.0.0",
     "typescript": "^5.9.3"
   },
