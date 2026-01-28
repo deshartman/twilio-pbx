@@ -63,6 +63,7 @@ SIP_DOMAIN_URI=your-domain.sip.twilio.com
 # Sync Service Configuration
 SYNC_SERVICE_NAME=pbx-routing
 SYNC_MAP_PHONES_NAME=numberConfig
+SYNC_MAP_RINGGROUP_NAME=ringGroup
 ```
 
 ## Setup
@@ -96,6 +97,8 @@ npm run deploy
 Navigate to your deployed `setupSync` function URL in a browser. The function will:
 - Create a Sync service (if it doesn't exist)
 - Create the `numberConfig` Map (if it doesn't exist)
+- Create the `ringGroup` Map (if it doesn't exist)
+- Populate ring group "1" with default destinations (if it doesn't exist)
 - Display the `SYNC_SERVICE_SID`
 
 Copy the `SYNC_SERVICE_SID` and add it to your `.env.dev` or `.env.prod`:
@@ -160,14 +163,84 @@ twilio api:sync:v1:services:sync-maps:sync-map-items:create \
 
 **Note**: CLI format does not use the "Data" wrapper that the Console requires.
 
+### Ring Group Configuration
+
+The `ringGroup` Map stores ring group destination arrays for sequential dialing:
+
+**Key**: Ring group ID (e.g., `1`, `2`, `3`)
+**Data**: JSON array of destination objects
+
+#### Adding Ring Groups via Twilio Console
+
+Navigate to: Explore Products → Sync → Services → [Your Service] → Maps → ringGroup
+
+**Ring Group Example** (key: `1`):
+```json
+{
+  "Data": [
+    {
+      "name": "sales_primary",
+      "type": "sip",
+      "destination": "sip:+61412345678@corporate.sip.twilio.com",
+      "timeout": 10
+    },
+    {
+      "name": "sales_fallback",
+      "type": "number",
+      "destination": "+61412345678",
+      "timeout": 30
+    }
+  ]
+}
+```
+
+**Note**: Console requires the "Data" wrapper. The value inside "Data" is your array.
+
+#### Adding Ring Groups via Twilio CLI
+
+```bash
+twilio api:sync:v1:services:sync-maps:sync-map-items:create \
+  --service-sid ISxxxx \
+  --sync-map-sid ringGroup \
+  --key "2" \
+  --data '[{"name":"support","type":"sip","destination":"sip:+61412345678@test.sip.twilio.com","timeout":15}]'
+```
+
+**Note**: CLI format passes the array directly as a JSON string, without the "Data" wrapper.
+
+#### Destination Fields
+
+- `name`: Friendly identifier for logging
+- `type`: Either `"sip"` or `"number"`
+- `destination`: Full SIP URI or E.164 phone number
+- `timeout`: Ring timeout in seconds
+
+#### SDK Usage (in code)
+
+When using the Twilio SDK in your functions, pass JavaScript arrays directly:
+
+```typescript
+await client.sync.v1
+  .services(serviceSid)
+  .syncMaps('ringGroup')
+  .syncMapItems
+  .create({
+    key: '3',
+    data: [
+      {name: 'dest1', type: 'sip', destination: 'sip:+123@domain.com', timeout: 10}
+    ]  // JavaScript array - SDK handles serialization
+  });
+```
+
 ## Available Functions
 
 ### `/setupSync`
-Idempotently creates Sync service and Map. Returns an HTML interface with setup details.
+Idempotently creates Sync service and Maps. Returns an HTML interface with setup details.
 
 **Environment Variables**:
 - `SYNC_SERVICE_NAME`
 - `SYNC_MAP_PHONES_NAME`
+- `SYNC_MAP_RINGGROUP_NAME`
 
 ### `/callTransfer`
 Handles call transfers with Sync Map lookup for dynamic routing.
@@ -193,7 +266,18 @@ Handles calls to PSTN numbers with REFER support.
 Handles calls to SIP endpoints with REFER support.
 
 ### `/ringGroup`
-Implements ring group functionality for simultaneous/sequential ringing.
+Sequential ring group with Sync Map configuration. Attempts each destination in order, proceeding to the next only if the previous call was not answered.
+
+**Query Parameters**:
+- `ringGroupId` (optional): Ring group ID to load (defaults to "1")
+
+**Environment Variables**:
+- `SYNC_SERVICE_SID`
+- `SYNC_MAP_RINGGROUP_NAME`
+
+**Usage**: `https://your-domain.twil.io/ringGroup?ringGroupId=1`
+
+Ring group destinations are loaded dynamically from the Sync Map, allowing real-time configuration changes without redeployment.
 
 ## Architecture
 
@@ -315,6 +399,7 @@ ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 AUTH_TOKEN=your_auth_token_here
 SYNC_SERVICE_SID=ISxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 SYNC_MAP_PHONES_NAME=numberConfig
+SYNC_MAP_RINGGROUP_NAME=ringGroup
 ```
 
 If any variables are missing, the test setup will display clear warnings indicating which variables need to be set.

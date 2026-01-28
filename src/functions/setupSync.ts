@@ -6,6 +6,7 @@ export interface ServerlessEnvironment {
   AUTH_TOKEN: string;
   SYNC_SERVICE_NAME?: string;
   SYNC_MAP_PHONES_NAME?: string;
+  SYNC_MAP_RINGGROUP_NAME?: string;
   [key: string]: string | undefined;
 }
 
@@ -45,10 +46,11 @@ export const handler: ServerlessFunctionSignature<ServerlessEnvironment, SetupSy
 
   const serviceName = context.SYNC_SERVICE_NAME;
   const mapName = context.SYNC_MAP_PHONES_NAME;
+  const ringGroupMapName = context.SYNC_MAP_RINGGROUP_NAME;
 
   // Validate required environment variables
-  if (!serviceName || !mapName) {
-    const errorMsg = 'Missing required environment variables: SYNC_SERVICE_NAME and/or SYNC_MAP_PHONES_NAME must be configured';
+  if (!serviceName || !mapName || !ringGroupMapName) {
+    const errorMsg = 'Missing required environment variables: SYNC_SERVICE_NAME, SYNC_MAP_PHONES_NAME, and/or SYNC_MAP_RINGGROUP_NAME must be configured';
     console.error(`setupSync: ${errorMsg}`);
     response.setStatusCode(400);
     response.setBody(errorMsg);
@@ -116,6 +118,76 @@ export const handler: ServerlessFunctionSignature<ServerlessEnvironment, SetupSy
       }
     }
 
+    // Step 3: Check if Ring Group Map already exists
+    console.log(`setupSync: Checking for existing Ring Group Map: ${ringGroupMapName}`);
+    let ringGroupMapSid: string;
+    let ringGroupMapCreated = false;
+
+    try {
+      const existingRingGroupMap = await client.sync.v1
+        .services(serviceSid)
+        .syncMaps(ringGroupMapName)
+        .fetch();
+
+      ringGroupMapSid = existingRingGroupMap.sid;
+      console.log(`setupSync: Found existing Ring Group Map: ${ringGroupMapSid}`);
+    } catch (error: any) {
+      if (error.status === 404) {
+        // Map doesn't exist, create it
+        console.log(`setupSync: Creating new Ring Group Map: ${ringGroupMapName}`);
+        const newRingGroupMap = await client.sync.v1
+          .services(serviceSid)
+          .syncMaps.create({
+            uniqueName: ringGroupMapName
+          });
+        ringGroupMapSid = newRingGroupMap.sid;
+        ringGroupMapCreated = true;
+        console.log(`setupSync: Created Ring Group Map: ${ringGroupMapSid}`);
+      } else {
+        console.error(`setupSync: Error checking Ring Group Map: ${error.message}`);
+        throw error;
+      }
+    }
+
+    // Step 4: Check if default ring group "1" exists, create if not
+    console.log(`setupSync: Checking for default ring group "1"`);
+    let ringGroupItemCreated = false;
+
+    try {
+      await client.sync.v1
+        .services(serviceSid)
+        .syncMaps(ringGroupMapName)
+        .syncMapItems('1')
+        .fetch();
+
+      console.log(`setupSync: Ring group "1" already exists`);
+    } catch (error: any) {
+      if (error.status === 404) {
+        // Ring group "1" doesn't exist, create with empty default
+        console.log(`setupSync: Creating default ring group "1" (empty - configure via Sync Maps)`);
+        const defaultDestinations: any[] = [
+          // TODO: Configure ring group destinations via Twilio Sync Maps
+          // Example format:
+          // { name: 'agent1', type: 'sip', destination: 'sip:user@domain.com', timeout: 10 }
+        ];
+
+        await client.sync.v1
+          .services(serviceSid)
+          .syncMaps(ringGroupMapName)
+          .syncMapItems
+          .create({
+            key: '1',
+            data: defaultDestinations
+          });
+
+        ringGroupItemCreated = true;
+        console.log(`setupSync: Created default ring group "1" (empty - ready for configuration)`);
+      } else {
+        console.error(`setupSync: Error checking ring group "1": ${error.message}`);
+        throw error;
+      }
+    }
+
     // Return success response with HTML
     console.log('setupSync: Success', JSON.stringify({
       serviceSid,
@@ -123,7 +195,11 @@ export const handler: ServerlessFunctionSignature<ServerlessEnvironment, SetupSy
       serviceCreated,
       mapSid,
       mapName,
-      mapCreated
+      mapCreated,
+      ringGroupMapSid,
+      ringGroupMapName,
+      ringGroupMapCreated,
+      ringGroupItemCreated
     }, null, 2));
 
     const html = `
@@ -301,12 +377,33 @@ export const handler: ServerlessFunctionSignature<ServerlessEnvironment, SetupSy
       </div>
     </div>
 
+    <div class="section">
+      <div class="section-title">Ring Group Map</div>
+      <div class="info-row">
+        <span class="label">Map Name:</span>
+        <span class="value">${ringGroupMapName}</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Map SID:</span>
+        <span class="value" onclick="copyToClipboard('${ringGroupMapSid}')" title="Click to copy">${ringGroupMapSid}</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Status:</span>
+        <span class="badge ${ringGroupMapCreated ? 'badge-created' : 'badge-exists'}">${ringGroupMapCreated ? 'created' : 'exists'}</span>
+      </div>
+      <div class="info-row">
+        <span class="label">Default Group "1":</span>
+        <span class="badge ${ringGroupItemCreated ? 'badge-created' : 'badge-exists'}">${ringGroupItemCreated ? 'created' : 'exists'}</span>
+      </div>
+    </div>
+
     <div class="next-steps">
       <div class="next-steps-title">Next Steps</div>
       <ol>
         <li>Add <code>SYNC_SERVICE_SID=${serviceSid}</code> to your .env files</li>
         <li>Verify <code>SYNC_MAP_PHONES_NAME=${mapName}</code> is configured</li>
-        <li>Populate the Map with phone number routing configurations</li>
+        <li>Verify <code>SYNC_MAP_RINGGROUP_NAME=${ringGroupMapName}</code> is configured</li>
+        <li>Populate the Maps with phone number routing and ring group configurations</li>
       </ol>
     </div>
   </div>

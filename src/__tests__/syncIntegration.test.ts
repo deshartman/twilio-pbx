@@ -466,3 +466,306 @@ describe('fetchNumberConfig Function - Multiple Routing Types', () => {
     });
   });
 });
+
+/**
+ * Ring Group Sync Integration Tests
+ *
+ * Tests for ring group configuration stored in Twilio Sync Maps.
+ * Ring groups store an array of destinations (SIP or PSTN) for sequential dialing.
+ *
+ * Test data uses ring group ID "999" (temporary, cleaned up after tests).
+ */
+describe('Ring Group Sync Integration Tests', () => {
+  let twilioClient: ReturnType<typeof Twilio>;
+  let serviceSid: string;
+  let ringGroupMapName: string;
+
+  const TEST_RING_GROUP_ID = '999';
+  const TEST_DESTINATIONS = [
+    {
+      name: 'test_sip',
+      type: 'sip',
+      destination: 'sip:+19999999999@test.sip.twilio.com',
+      timeout: 10
+    },
+    {
+      name: 'test_pstn',
+      type: 'number',
+      destination: '+18885551234',
+      timeout: 20
+    }
+  ];
+
+  // Helper function - matches implementation in ringGroup.ts
+  async function fetchRingGroupConfig(
+    restClient: any,
+    serviceSid: string,
+    mapName: string,
+    ringGroupId: string
+  ): Promise<any[] | null> {
+    if (!restClient || !serviceSid || !mapName || !ringGroupId) {
+      return null;
+    }
+
+    try {
+      const item = await restClient.sync.v1
+        .services(serviceSid)
+        .syncMaps(mapName)
+        .syncMapItems(ringGroupId)
+        .fetch();
+
+      if (!Array.isArray(item.data)) {
+        return null;
+      }
+
+      return item.data;
+    } catch (error: any) {
+      if (error.status === 404) {
+        return null;
+      }
+      return null;
+    }
+  }
+
+  beforeAll(async () => {
+    // Load config from .env.dev
+    serviceSid = process.env.SYNC_SERVICE_SID || '';
+    ringGroupMapName = process.env.SYNC_MAP_RINGGROUP_NAME || '';
+    twilioClient = Twilio(process.env.ACCOUNT_SID!, process.env.AUTH_TOKEN!);
+
+    if (!serviceSid || !ringGroupMapName) {
+      throw new Error('SYNC_SERVICE_SID and SYNC_MAP_RINGGROUP_NAME must be set in .env.dev');
+    }
+
+    // Check if ringGroup Map exists, create if not
+    try {
+      await twilioClient.sync.v1
+        .services(serviceSid)
+        .syncMaps(ringGroupMapName)
+        .fetch();
+      console.log(`✓ Ring group map "${ringGroupMapName}" exists`);
+    } catch (error: any) {
+      if (error.status === 404) {
+        console.log(`✓ Creating ring group map "${ringGroupMapName}"`);
+        await twilioClient.sync.v1
+          .services(serviceSid)
+          .syncMaps
+          .create({
+            uniqueName: ringGroupMapName
+          });
+        console.log(`✓ Created ring group map "${ringGroupMapName}"`);
+      } else {
+        throw error;
+      }
+    }
+
+    // Create test ring group
+    await twilioClient.sync.v1
+      .services(serviceSid)
+      .syncMaps(ringGroupMapName)
+      .syncMapItems
+      .create({
+        key: TEST_RING_GROUP_ID,
+        data: TEST_DESTINATIONS
+      });
+
+    console.log(`✓ Created test ring group: ${TEST_RING_GROUP_ID}`);
+  }, 30000);
+
+  afterAll(async () => {
+    // Clean up test ring group
+    try {
+      await twilioClient.sync.v1
+        .services(serviceSid)
+        .syncMaps(ringGroupMapName)
+        .syncMapItems(TEST_RING_GROUP_ID)
+        .remove();
+      console.log(`✓ Cleaned up test ring group: ${TEST_RING_GROUP_ID}`);
+    } catch (error: any) {
+      if (error.status !== 404) {
+        console.warn(`Cleanup warning for ${TEST_RING_GROUP_ID}: ${error.message}`);
+      }
+    }
+  }, 30000);
+
+  test('Create ring group item in Sync Map', async () => {
+    // Delete if exists
+    try {
+      await twilioClient.sync.v1
+        .services(serviceSid)
+        .syncMaps(ringGroupMapName)
+        .syncMapItems('998')
+        .remove();
+    } catch (error: any) {
+      // Ignore 404
+    }
+
+    const testData = [
+      {
+        name: 'create_test',
+        type: 'sip',
+        destination: 'sip:+19999999998@test.sip.twilio.com',
+        timeout: 15
+      }
+    ];
+
+    const item = await twilioClient.sync.v1
+      .services(serviceSid)
+      .syncMaps(ringGroupMapName)
+      .syncMapItems
+      .create({
+        key: '998',
+        data: testData
+      });
+
+    expect(item.key).toBe('998');
+    expect(Array.isArray(item.data)).toBe(true);
+    expect(item.data).toEqual(testData);
+
+    // Cleanup
+    await twilioClient.sync.v1
+      .services(serviceSid)
+      .syncMaps(ringGroupMapName)
+      .syncMapItems('998')
+      .remove();
+  }, 10000);
+
+  test('Read ring group and validate structure', async () => {
+    const item = await twilioClient.sync.v1
+      .services(serviceSid)
+      .syncMaps(ringGroupMapName)
+      .syncMapItems(TEST_RING_GROUP_ID)
+      .fetch();
+
+    expect(item.key).toBe(TEST_RING_GROUP_ID);
+    expect(Array.isArray(item.data)).toBe(true);
+    expect(item.data.length).toBe(2);
+
+    // Validate destination structure
+    item.data.forEach((dest: any) => {
+      expect(dest).toHaveProperty('name');
+      expect(dest).toHaveProperty('type');
+      expect(dest).toHaveProperty('destination');
+      expect(dest).toHaveProperty('timeout');
+      expect(['sip', 'number']).toContain(dest.type);
+    });
+  }, 10000);
+
+  test('Update ring group destinations', async () => {
+    const updatedDestinations = [
+      {
+        name: 'updated_dest',
+        type: 'number',
+        destination: '+18005551234',
+        timeout: 25
+      }
+    ];
+
+    const item = await twilioClient.sync.v1
+      .services(serviceSid)
+      .syncMaps(ringGroupMapName)
+      .syncMapItems(TEST_RING_GROUP_ID)
+      .update({ data: updatedDestinations });
+
+    expect(item.key).toBe(TEST_RING_GROUP_ID);
+    expect(Array.isArray(item.data)).toBe(true);
+    expect(item.data).toEqual(updatedDestinations);
+
+    // Restore original data
+    await twilioClient.sync.v1
+      .services(serviceSid)
+      .syncMaps(ringGroupMapName)
+      .syncMapItems(TEST_RING_GROUP_ID)
+      .update({ data: TEST_DESTINATIONS });
+  }, 10000);
+
+  test('Delete ring group item', async () => {
+    // Create temporary item
+    await twilioClient.sync.v1
+      .services(serviceSid)
+      .syncMaps(ringGroupMapName)
+      .syncMapItems
+      .create({
+        key: '997',
+        data: [{ name: 'temp', type: 'sip', destination: 'sip:temp@test.com', timeout: 10 }]
+      });
+
+    // Delete it
+    await twilioClient.sync.v1
+      .services(serviceSid)
+      .syncMaps(ringGroupMapName)
+      .syncMapItems('997')
+      .remove();
+
+    // Verify it's deleted
+    await expect(
+      twilioClient.sync.v1
+        .services(serviceSid)
+        .syncMaps(ringGroupMapName)
+        .syncMapItems('997')
+        .fetch()
+    ).rejects.toThrow();
+  }, 10000);
+
+  test('Handle 404 for unmapped ring group IDs', async () => {
+    const nonExistentId = '888';
+
+    await expect(
+      twilioClient.sync.v1
+        .services(serviceSid)
+        .syncMaps(ringGroupMapName)
+        .syncMapItems(nonExistentId)
+        .fetch()
+    ).rejects.toThrow();
+  }, 10000);
+
+  test('fetchRingGroupConfig returns correct data', async () => {
+    const result = await fetchRingGroupConfig(
+      twilioClient,
+      serviceSid,
+      ringGroupMapName,
+      TEST_RING_GROUP_ID
+    );
+
+    expect(result).not.toBeNull();
+    expect(Array.isArray(result)).toBe(true);
+    expect(result?.length).toBe(2);
+
+    // Validate first destination
+    expect(result?.[0].name).toBe('test_sip');
+    expect(result?.[0].type).toBe('sip');
+    expect(result?.[0].destination).toBe('sip:+19999999999@test.sip.twilio.com');
+    expect(result?.[0].timeout).toBe(10);
+
+    // Validate second destination
+    expect(result?.[1].name).toBe('test_pstn');
+    expect(result?.[1].type).toBe('number');
+    expect(result?.[1].destination).toBe('+18885551234');
+    expect(result?.[1].timeout).toBe(20);
+  }, 10000);
+
+  test('fetchRingGroupConfig returns null for non-existent ring groups', async () => {
+    const result = await fetchRingGroupConfig(
+      twilioClient,
+      serviceSid,
+      ringGroupMapName,
+      '777'
+    );
+
+    expect(result).toBeNull();
+  }, 10000);
+
+  test('fetchRingGroupConfig returns null for invalid parameters', async () => {
+    const result1 = await fetchRingGroupConfig(null as any, serviceSid, ringGroupMapName, TEST_RING_GROUP_ID);
+    expect(result1).toBeNull();
+
+    const result2 = await fetchRingGroupConfig(twilioClient, '', ringGroupMapName, TEST_RING_GROUP_ID);
+    expect(result2).toBeNull();
+
+    const result3 = await fetchRingGroupConfig(twilioClient, serviceSid, '', TEST_RING_GROUP_ID);
+    expect(result3).toBeNull();
+
+    const result4 = await fetchRingGroupConfig(twilioClient, serviceSid, ringGroupMapName, '');
+    expect(result4).toBeNull();
+  }, 10000);
+});
