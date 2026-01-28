@@ -6,6 +6,16 @@ A modern IP PBX implementation using Twilio Voice with registered SIP endpoints 
 
 This project provides a flexible PBX system that integrates Twilio Voice with SIP endpoints, enabling dynamic call routing, ring groups, and call transfers. Configuration is managed through Twilio Sync Maps, allowing real-time routing changes without redeployment.
 
+## History Rewrite Notice (January 28, 2026)
+
+**IMPORTANT**: On January 28, 2026, this repository's git history was rewritten to remove accidentally committed sensitive information (phone numbers and SIP credentials).
+
+If you have a local clone created before this date:
+1. Delete your local repository
+2. Re-clone from GitHub: `git clone https://github.com/deshartman/twilio-pbx.git`
+
+The commit history has been modified, but all functionality remains intact. The removed credentials should be rotated as a security precaution.
+
 ## Features
 
 ### Core Capabilities
