@@ -68,15 +68,15 @@ async function fetchRingGroupConfig(
       .syncMapItems(ringGroupId)
       .fetch();
 
-    console.log('Ring Group Sync: Fetch result', JSON.stringify({ key: item.key, dataType: typeof item.data, isArray: Array.isArray(item.data) }));
+    console.log('Ring Group Sync: Fetch result', JSON.stringify({ key: item.key, dataType: typeof item.data, hasGroup: !!item.data?.group, isGroupArray: Array.isArray(item.data?.group) }));
 
-    // Validate that data is an array
-    if (!Array.isArray(item.data)) {
-      console.error(`Ring Group Sync: Invalid data format for ring group ${ringGroupId} - expected array, got ${typeof item.data}`);
+    // Validate that data.group exists and is an array
+    if (!item.data || !item.data.group || !Array.isArray(item.data.group)) {
+      console.error(`Ring Group Sync: Invalid data format for ring group ${ringGroupId} - expected object with 'group' array, got ${typeof item.data}`);
       return null;
     }
 
-    return item.data as RingGroupDestination[];
+    return item.data.group as RingGroupDestination[];
   } catch (error: any) {
     if (error.status === 404) {
       console.warn(`Ring Group Sync: Ring group ${ringGroupId} not found in map`);

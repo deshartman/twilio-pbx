@@ -481,20 +481,22 @@ describe('Ring Group Sync Integration Tests', () => {
   let ringGroupMapName: string;
 
   const TEST_RING_GROUP_ID = '999';
-  const TEST_DESTINATIONS = [
-    {
-      name: 'test_sip',
-      type: 'sip',
-      destination: 'sip:+19999999999@test.sip.twilio.com',
-      timeout: 10
-    },
-    {
-      name: 'test_pstn',
-      type: 'number',
-      destination: '+18885551234',
-      timeout: 20
-    }
-  ];
+  const TEST_DESTINATIONS = {
+    group: [
+      {
+        name: 'test_sip',
+        type: 'sip',
+        destination: 'sip:+19999999999@test.sip.twilio.com',
+        timeout: 10
+      },
+      {
+        name: 'test_pstn',
+        type: 'number',
+        destination: '+18885551234',
+        timeout: 20
+      }
+    ]
+  };
 
   // Helper function - matches implementation in ringGroup.ts
   async function fetchRingGroupConfig(
@@ -514,11 +516,11 @@ describe('Ring Group Sync Integration Tests', () => {
         .syncMapItems(ringGroupId)
         .fetch();
 
-      if (!Array.isArray(item.data)) {
+      if (!item.data || !item.data.group || !Array.isArray(item.data.group)) {
         return null;
       }
 
-      return item.data;
+      return item.data.group;
     } catch (error: any) {
       if (error.status === 404) {
         return null;
@@ -600,14 +602,16 @@ describe('Ring Group Sync Integration Tests', () => {
       // Ignore 404
     }
 
-    const testData = [
-      {
-        name: 'create_test',
-        type: 'sip',
-        destination: 'sip:+19999999998@test.sip.twilio.com',
-        timeout: 15
-      }
-    ];
+    const testData = {
+      group: [
+        {
+          name: 'create_test',
+          type: 'sip',
+          destination: 'sip:+19999999998@test.sip.twilio.com',
+          timeout: 15
+        }
+      ]
+    };
 
     const item = await twilioClient.sync.v1
       .services(serviceSid)
@@ -619,7 +623,8 @@ describe('Ring Group Sync Integration Tests', () => {
       });
 
     expect(item.key).toBe('998');
-    expect(Array.isArray(item.data)).toBe(true);
+    expect(item.data.group).toBeDefined();
+    expect(Array.isArray(item.data.group)).toBe(true);
     expect(item.data).toEqual(testData);
 
     // Cleanup
@@ -638,11 +643,12 @@ describe('Ring Group Sync Integration Tests', () => {
       .fetch();
 
     expect(item.key).toBe(TEST_RING_GROUP_ID);
-    expect(Array.isArray(item.data)).toBe(true);
-    expect(item.data.length).toBe(2);
+    expect(item.data.group).toBeDefined();
+    expect(Array.isArray(item.data.group)).toBe(true);
+    expect(item.data.group.length).toBe(2);
 
     // Validate destination structure
-    item.data.forEach((dest: any) => {
+    item.data.group.forEach((dest: any) => {
       expect(dest).toHaveProperty('name');
       expect(dest).toHaveProperty('type');
       expect(dest).toHaveProperty('destination');
@@ -652,14 +658,16 @@ describe('Ring Group Sync Integration Tests', () => {
   }, 10000);
 
   test('Update ring group destinations', async () => {
-    const updatedDestinations = [
-      {
-        name: 'updated_dest',
-        type: 'number',
-        destination: '+18005551234',
-        timeout: 25
-      }
-    ];
+    const updatedDestinations = {
+      group: [
+        {
+          name: 'updated_dest',
+          type: 'number',
+          destination: '+18005551234',
+          timeout: 25
+        }
+      ]
+    };
 
     const item = await twilioClient.sync.v1
       .services(serviceSid)
@@ -668,7 +676,8 @@ describe('Ring Group Sync Integration Tests', () => {
       .update({ data: updatedDestinations });
 
     expect(item.key).toBe(TEST_RING_GROUP_ID);
-    expect(Array.isArray(item.data)).toBe(true);
+    expect(item.data.group).toBeDefined();
+    expect(Array.isArray(item.data.group)).toBe(true);
     expect(item.data).toEqual(updatedDestinations);
 
     // Restore original data
@@ -687,7 +696,7 @@ describe('Ring Group Sync Integration Tests', () => {
       .syncMapItems
       .create({
         key: '997',
-        data: [{ name: 'temp', type: 'sip', destination: 'sip:temp@test.com', timeout: 10 }]
+        data: { group: [{ name: 'temp', type: 'sip', destination: 'sip:temp@test.com', timeout: 10 }] }
       });
 
     // Delete it

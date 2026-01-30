@@ -108,7 +108,7 @@ Navigate to your deployed `setupSync` function URL in a browser. The function wi
 - Create a Sync service (if it doesn't exist)
 - Create the `numberConfig` Map (if it doesn't exist)
 - Create the `ringGroup` Map (if it doesn't exist)
-- Populate ring group "1" with default destinations (if it doesn't exist)
+- Populate ring group "1" with default destinations in the correct format: `{"group": [...]}`
 - Display the `SYNC_SERVICE_SID`
 
 Copy the `SYNC_SERVICE_SID` and add it to your `.env.dev` or `.env.prod`:
@@ -177,34 +177,50 @@ twilio api:sync:v1:services:sync-maps:sync-map-items:create \
 
 The `ringGroup` Map stores ring group destination arrays for sequential dialing:
 
-**Key**: Ring group ID (e.g., `1`, `2`, `3`)
-**Data**: JSON array of destination objects
+**Key**: Ring group ID (e.g., `1`, `2`, `group1`)
+**Data**: JSON object with a `group` property containing an array of destination objects
+
+**Important**: Twilio Sync Maps require the root value to be an object, not an array. Ring group destinations must be wrapped in a `group` property.
 
 #### Adding Ring Groups via Twilio Console
 
 Navigate to: Explore Products → Sync → Services → [Your Service] → Maps → ringGroup
 
-**Ring Group Example** (key: `1`):
+**Ring Group Example** (key: `group1`):
 ```json
 {
-  "Data": [
-    {
-      "name": "sales_primary",
-      "type": "sip",
-      "destination": "sip:+61412345678@corporate.sip.twilio.com",
-      "timeout": 10
-    },
-    {
-      "name": "sales_fallback",
-      "type": "number",
-      "destination": "+61412345678",
-      "timeout": 30
-    }
-  ]
+  "Data": {
+    "group": [
+      {
+        "name": "sales_primary",
+        "type": "sip",
+        "destination": "sip:+61412345678@corporate.sip.twilio.com",
+        "timeout": 10
+      },
+      {
+        "name": "sales_fallback",
+        "type": "number",
+        "destination": "+61412345678",
+        "timeout": 30
+      }
+    ]
+  }
 }
 ```
 
-**Note**: Console requires the "Data" wrapper. The value inside "Data" is your array.
+**Note**: Console requires the "Data" wrapper. The value inside "Data" must be an object with a "group" property containing your destinations array.
+
+#### Adding Ring Groups via cURL
+
+```bash
+curl -X POST \
+  'https://sync.twilio.com/v1/Services/ISxxxx/Maps/MPxxxx/Items' \
+  -u 'ACxxxx:your_auth_token' \
+  -d 'Key=group1' \
+  -d 'Data={"group":[{"name":"support","type":"sip","destination":"sip:+61412345678@test.sip.twilio.com","timeout":15}]}'
+```
+
+**Note**: Use the Map SID (MPxxxx) instead of the unique name when using cURL. The data must be an object with a "group" property.
 
 #### Adding Ring Groups via Twilio CLI
 
@@ -213,21 +229,21 @@ twilio api:sync:v1:services:sync-maps:sync-map-items:create \
   --service-sid ISxxxx \
   --sync-map-sid ringGroup \
   --key "2" \
-  --data '[{"name":"support","type":"sip","destination":"sip:+61412345678@test.sip.twilio.com","timeout":15}]'
+  --data '{"group":[{"name":"support","type":"sip","destination":"sip:+61412345678@test.sip.twilio.com","timeout":15}]}'
 ```
 
-**Note**: CLI format passes the array directly as a JSON string, without the "Data" wrapper.
+**Note**: CLI format requires the data to be an object with a "group" property containing the destinations array.
 
 #### Destination Fields
 
 - `name`: Friendly identifier for logging
 - `type`: Either `"sip"` or `"number"`
 - `destination`: Full SIP URI or E.164 phone number
-- `timeout`: Ring timeout in seconds
+- `timeout`: Ring timeout in seconds (use integer, not string)
 
 #### SDK Usage (in code)
 
-When using the Twilio SDK in your functions, pass JavaScript arrays directly:
+When using the Twilio SDK in your functions, pass a JavaScript object with a `group` property:
 
 ```typescript
 await client.sync.v1
@@ -236,9 +252,11 @@ await client.sync.v1
   .syncMapItems
   .create({
     key: '3',
-    data: [
-      {name: 'dest1', type: 'sip', destination: 'sip:+123@domain.com', timeout: 10}
-    ]  // JavaScript array - SDK handles serialization
+    data: {
+      group: [
+        {name: 'dest1', type: 'sip', destination: 'sip:+123@domain.com', timeout: 10}
+      ]
+    }  // Object with group property - SDK handles serialization
   });
 ```
 

@@ -165,11 +165,13 @@ export const handler: ServerlessFunctionSignature<ServerlessEnvironment, SetupSy
       if (error.status === 404) {
         // Ring group "1" doesn't exist, create with empty default
         console.log(`setupSync: Creating default ring group "1" (empty - configure via Sync Maps)`);
-        const defaultDestinations: any[] = [
-          // TODO: Configure ring group destinations via Twilio Sync Maps
-          // Example format:
-          // { name: 'agent1', type: 'sip', destination: 'sip:user@domain.com', timeout: 10 }
-        ];
+        const defaultRingGroup = {
+          group: [
+            // TODO: Configure ring group destinations via Twilio Sync Maps
+            // Example format:
+            // { name: 'agent1', type: 'sip', destination: 'sip:user@domain.com', timeout: 10 }
+          ]
+        };
 
         await client.sync.v1
           .services(serviceSid)
@@ -177,7 +179,7 @@ export const handler: ServerlessFunctionSignature<ServerlessEnvironment, SetupSy
           .syncMapItems
           .create({
             key: '1',
-            data: defaultDestinations
+            data: defaultRingGroup
           });
 
         ringGroupItemCreated = true;
